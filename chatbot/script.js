@@ -1,8 +1,39 @@
 const chatBody = document.querySelector(".chat-body");
 const messageInput = document.querySelector(".message-input");
 const sendMessageButton = document.querySelector("#send-message");
+const fileInput = document.querySelector("#file-input");
 
-const userData = { message: null }
+
+const userData = { 
+    message: null,
+    file: {
+        data: null,
+        mime_type: null,
+        name: null
+    }
+}
+
+
+const getFilePreviewHTML = () => {
+    const { data, mime_type, name } = userData.file;
+    if (!data || !mime_type) return "";
+
+    const base64 = `data:${mime_type};base64,${data}`;
+    const filename = name ? encodeURIComponent(name) : "file";
+
+    if (mime_type.startsWith("image/")) {
+        return `<img src="${base64}" alt="Uploaded Image" class="attachment" />`;
+    } else if (mime_type === "application/pdf") {
+        return `<embed src="${base64}" type="application/pdf" class="attachment pdf-preview" />`;
+    } else {
+        return `
+            <div class="attachment-box">
+                <a href="${base64}" download="${filename}" class="attachment">
+                    📎 파일 다운로드<br>(${mime_type})
+                </a>
+            </div>`;
+    }
+};
 
 
 const createMessageElement = (content, ...classes) => {
@@ -12,12 +43,26 @@ const createMessageElement = (content, ...classes) => {
     return div;
 }
 
+
+
+
+// **(챗봇 응답 나중에 llm 연동)
+const generateBotResponse = () => {
+
+}
+
+
+
+
 const handleOutgoingMessage = (e) => {
     e.preventDefault();
     userData.message = messageInput.value.trim();
     messageInput.value = "";
 
-    const messageContent = `<div class="message-text"></div>`;
+    const filePreview = getFilePreviewHTML();
+
+    const messageContent = `<div class="message-text"></div>
+                            ${filePreview}`;
 
     const outgoingMessageDiv = createMessageElement(messageContent, "user-message");
     outgoingMessageDiv.querySelector(".message-text").textContent = userData.message;
@@ -39,6 +84,11 @@ const handleOutgoingMessage = (e) => {
 
         const incomingMessageDiv = createMessageElement(messageContent, "bot-message", "thinking");
         chatBody.appendChild(incomingMessageDiv);
+
+
+        // chatbot 응답
+        generateBotResponse();
+
     }, 600);
 }
 
@@ -50,5 +100,28 @@ messageInput.addEventListener("keydown", (e) => {
     }
 });
 
+// file 
+fileInput.addEventListener("change", () => {
+    const file = fileInput.files[0];    // 사용자가 선택한 첫번째 파일
+    if(!file) return;
+
+    const reader = new FileReader();    // 파일 읽기 위한 FileReader 객체 생성
+    reader.onload = (e) => {
+        const base64String = e.target.result.split(",")[1];
+
+        userData.file = {
+            data: base64String,
+            mime_type: file.type,
+            name: file.name
+        }
+        fileInput.value = "";
+    }
+
+    reader.readAsDataURL(file);
+    
+});
+
 
 sendMessageButton.addEventListener("click", (e) => handleOutgoingMessage(e))
+
+document.querySelector("#file-upload").addEventListener("click", () => fileInput.click());
