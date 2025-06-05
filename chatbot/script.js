@@ -3,9 +3,13 @@ const messageInput = document.querySelector(".message-input");
 const sendMessageButton = document.querySelector("#send-message");
 const fileInput = document.querySelector("#file-input");
 
+let fileUploadedOnce = false;
+
 
 const userData = { 
+    stage: "awaiting_file", 
     message: null,
+    suspect: null,
     file: {
         data: null,
         mime_type: null,
@@ -29,7 +33,7 @@ const getFilePreviewHTML = () => {
         return `
             <div class="attachment-box">
                 <a href="${base64}" download="${filename}" class="attachment">
-                    📎 파일 다운로드<br>(${mime_type})
+                    📎 파일 업로드<br>(${mime_type})
                 </a>
             </div>`;
     }
@@ -46,9 +50,87 @@ const createMessageElement = (content, ...classes) => {
 
 
 
-// **(챗봇 응답 나중에 llm 연동)
+// ** 챗봇 응답 - llm 연동
 const generateBotResponse = () => {
+    const formData = new FormData();
 
+    // 1단계: 파일 업로드 → 사용자 목록 요청
+    if (userData.stage === "awaiting_file" && userData.file.data) {
+
+        // ✅ [검증 코드: 파일이 정상인지 확인]
+        if (!userData.file.name || !userData.file.mime_type || !userData.file.data) {
+            alert("⚠️ 파일 정보가 불완전합니다. 다시 업로드 해주세요.");
+            return;
+        }
+
+        const byteCharacters = atob(userData.file.data);
+        const byteArray = new Uint8Array([...byteCharacters].map(c => c.charCodeAt(0)));
+        const blob = new Blob([byteArray], { type: userData.file.mime_type });
+        const file = new File([blob], userData.file.name, { type: userData.file.mime_type });
+
+        console.log("🧾 생성된 File 객체 확인:", file);
+
+        formData.append("file", file); // 파일만 전송
+
+        for (let pair of formData.entries()) {
+            console.log(`🧾 FormData key: ${pair[0]}`, pair[1]);
+        }
+
+
+        fetch("http://210.125.91.90:8000/get_users", {
+            method: "POST",
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+
+            console.log("📥 서버 응답:", data); // 여기서 확인해보세요
+
+            if (data.error) {
+                alert("❌ 서버 오류: " + data.error);
+                return;
+            }
+
+            const botMessageDiv = document.querySelector(".bot-message.thinking");
+            botMessageDiv.classList.remove("thinking");
+            botMessageDiv.querySelector(".message-text").innerHTML =
+              `📌 분석 가능한 사용자 목록: ${data.users.join(", ")}<br>분석할 사용자를 입력해주세요.`;
+
+            userData.stage = "awaiting_user";
+            userData.file.filename = data.filename;
+        });
+    }
+
+    // 사용자 이름 입력 → 날짜 질문
+    else if (userData.stage === "awaiting_user" && userData.message) {
+        userData.suspect = userData.message;
+        userData.message = null;  
+
+        const botMessageDiv = document.querySelector(".bot-message.thinking");
+        botMessageDiv.classList.remove("thinking");
+        botMessageDiv.querySelector(".message-text").innerHTML =
+          `📅 분석할 대화 기간을 입력해주세요.<br>예: "최근 일주일", "2025년 5월 1일부터 5월 5일까지"`;
+
+        userData.stage = "awaiting_date";
+    }
+
+    // 날짜 입력 → 분석 요청
+    else if (userData.stage === "awaiting_date" && userData.message) {
+        formData.append("suspect", userData.suspect);
+        formData.append("filename", userData.file.name);
+        formData.append("date_range", userData.message);  
+        fetch("http://210.125.91.90:8000/analyze", {
+            method: "POST",
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            const botMessageDiv = document.querySelector(".bot-message.thinking");
+            botMessageDiv.classList.remove("thinking");
+            botMessageDiv.querySelector(".message-text").textContent = data.bot_reply;
+            userData.stage = "done";
+        });
+    }
 }
 
 
@@ -56,19 +138,24 @@ const generateBotResponse = () => {
 
 const handleOutgoingMessage = (e) => {
     e.preventDefault();
-    userData.message = messageInput.value.trim();
-    messageInput.value = "";
 
+    const msg = messageInput.value.trim();
     const filePreview = getFilePreviewHTML();
 
-    const messageContent = `<div class="message-text"></div>
-                            ${filePreview}`;
+    // 메시지 또는 파일이 없으면 무시
+    if (!msg && !userData.file.data) return;
 
+    userData.message = msg;
+    messageInput.value = "";
+
+    const messageContent = `<div class="message-text"></div>${filePreview}`;
     const outgoingMessageDiv = createMessageElement(messageContent, "user-message");
-    outgoingMessageDiv.querySelector(".message-text").textContent = userData.message;
+    outgoingMessageDiv.querySelector(".message-text").textContent = msg;
     chatBody.appendChild(outgoingMessageDiv);
 
-    // bot message delay
+    // 파일 업로드 표시 여부 업데이트
+    if (filePreview) fileUploadedOnce = true;
+
     setTimeout(() => {
         const messageContent = `<svg class="bot-avatar" xmlns="http://www.w3.org/2000/svg" width="50" height="50" 
                 viewBox="0 0 1024 1024">
@@ -81,31 +168,39 @@ const handleOutgoingMessage = (e) => {
                         <div class="dot"></div>
                     </div>
                 </div>`;
-
         const incomingMessageDiv = createMessageElement(messageContent, "bot-message", "thinking");
         chatBody.appendChild(incomingMessageDiv);
 
-
-        // chatbot 응답
         generateBotResponse();
 
+        // 전송 직후 입력 초기화 (중복 방지)
+        userData.message = null;
+
     }, 600);
-}
+};
+
+
+
 
 // Enter 클릭 -> 메시지 보내기
 messageInput.addEventListener("keydown", (e) => {
-    const userMessage = e.target.value.trim();
-    if(e.key === "Enter" && userMessage) {
-        handleOutgoingMessage(e);
+    if (e.isComposing) return;
+
+    if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault(); 
+        const msg = messageInput.value.trim();
+        if (msg || userData.file.data) {
+            handleOutgoingMessage(e);
+        }
     }
 });
 
-// file 
+
 fileInput.addEventListener("change", () => {
-    const file = fileInput.files[0];    // 사용자가 선택한 첫번째 파일
+    const file = fileInput.files[0];   
     if(!file) return;
 
-    const reader = new FileReader();    // 파일 읽기 위한 FileReader 객체 생성
+    const reader = new FileReader();  
     reader.onload = (e) => {
         const base64String = e.target.result.split(",")[1];
 
@@ -114,6 +209,7 @@ fileInput.addEventListener("change", () => {
             mime_type: file.type,
             name: file.name
         }
+        fileUploadedOnce = false; // 새 파일 선택 시 초기화
         fileInput.value = "";
     }
 
@@ -122,6 +218,22 @@ fileInput.addEventListener("change", () => {
 });
 
 
-sendMessageButton.addEventListener("click", (e) => handleOutgoingMessage(e))
+
+// sendMessageButton.addEventListener("click", (e) => {
+//     const userMessage = messageInput.value.trim();
+//     if (userMessage || userData.file.data) {
+//         handleOutgoingMessage(e);
+//     }
+// });
+
+document.querySelector(".chat-form").addEventListener("submit", (e) => {
+    e.preventDefault(); 
+
+    const userMessage = messageInput.value.trim();
+    if (userMessage || userData.file.data) {
+        handleOutgoingMessage(e);
+    }
+});
+
 
 document.querySelector("#file-upload").addEventListener("click", () => fileInput.click());
