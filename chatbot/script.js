@@ -57,7 +57,7 @@ const generateBotResponse = () => {
     // 1단계: 파일 업로드 → 사용자 목록 요청
     if (userData.stage === "awaiting_file" && userData.file.data) {
 
-        // ✅ [검증 코드: 파일이 정상인지 확인]
+        // 검증 코드: 파일이 정상인지 확인
         if (!userData.file.name || !userData.file.mime_type || !userData.file.data) {
             alert("⚠️ 파일 정보가 불완전합니다. 다시 업로드 해주세요.");
             return;
@@ -84,7 +84,7 @@ const generateBotResponse = () => {
         .then(res => res.json())
         .then(data => {
 
-            console.log("📥 서버 응답:", data); // 여기서 확인해보세요
+            console.log("📥 서버 응답:", data); 
 
             if (data.error) {
                 alert("❌ 서버 오류: " + data.error);
@@ -127,7 +127,11 @@ const generateBotResponse = () => {
         .then(data => {
             const botMessageDiv = document.querySelector(".bot-message.thinking");
             botMessageDiv.classList.remove("thinking");
-            botMessageDiv.querySelector(".message-text").textContent = data.bot_reply;
+
+            // 줄바꿈 깔끔하게 표현
+            botMessageDiv.querySelector(".message-text").innerHTML = 
+                data.bot_reply.replace(/\n/g, "<br>");
+
             userData.stage = "done";
         });
     }
@@ -216,15 +220,6 @@ fileInput.addEventListener("change", () => {
     reader.readAsDataURL(file);
     
 });
-
-
-
-// sendMessageButton.addEventListener("click", (e) => {
-//     const userMessage = messageInput.value.trim();
-//     if (userMessage || userData.file.data) {
-//         handleOutgoingMessage(e);
-//     }
-// });
 
 document.querySelector(".chat-form").addEventListener("submit", (e) => {
     e.preventDefault(); 
